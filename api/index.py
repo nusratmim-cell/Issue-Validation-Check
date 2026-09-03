@@ -508,9 +508,25 @@ class handler(BaseHTTPRequestHandler):
                 return self._send(b'', 404)
 
         if path == '/health':
-            return self._json({'ok': True, 'shared_state': not DEGRADED,
-                               'google_login': auth.OAUTH_ON,
-                               'domain': auth.ALLOWED_DOMAIN})
+            # Reports which variables are SET, never their values. Without this
+            # a half-configured deployment just says "google_login: false" and
+            # leaves you guessing which of the two is missing.
+            need = ('ADMIN_EMAIL', 'ADMIN_PASSWORD', 'PORTAL_SECRET',
+                    'ALLOWED_DOMAIN', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
+                    'UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN')
+            env = {k: bool(os.environ.get(k)) for k in need}
+            missing = [k for k, v in env.items() if not v]
+            return self._json({
+                'ok': not missing,
+                'shared_state': not DEGRADED,
+                'google_login': auth.OAUTH_ON,
+                'domain': auth.ALLOWED_DOMAIN,
+                'env_set': env,
+                'missing': missing,
+                'hint': ('all variables present' if not missing else
+                         f'{len(missing)} not set on this deployment - add them, '
+                         f'then REDEPLOY (variables only apply to a new build)'),
+            })
 
         if path == '/auth/start':
             if not auth.OAUTH_ON:
