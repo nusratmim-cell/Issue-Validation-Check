@@ -51,25 +51,60 @@ def _sig(body):
     return hmac.new(SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()[:32]
 
 
-def make_token(email, hours=SESSION_HOURS):
-    body = f'{email}|{int(time.time()) + hours * 3600}'
+def _sign(subject, seconds):
+    """A signed, expiring string. int() wraps the whole sum - the state token's
+    lifetime is fractional minutes, and a float expiry would serialise as
+    '...911.0' and fail to parse on the way back in."""
+    body = f'{subject}|{int(time.time() + seconds)}'
     return f'{body}|{_sig(body)}'
 
 
-def read_token(tok):
+def _unsign(tok):
+    """Subject of a token whose signature and expiry both check out, else None.
+    Says nothing about whether that subject may log in - see read_token."""
     if not SECRET or not tok:
         return None
     try:
-        email, exp, sig = tok.split('|')
+        subject, exp, sig = tok.split('|')
+    except (ValueError, AttributeError):
+        return None
+    if not hmac.compare_digest(sig, _sig(f'{subject}|{exp}')):
+        return None
+    try:
+        if float(exp) < time.time():
+            return None
     except ValueError:
         return None
-    if not hmac.compare_digest(sig, _sig(f'{email}|{exp}')):
-        return None
-    if int(exp) < time.time():
+    return subject
+
+
+# Session cookies and OAuth state are both signed strings, but they are not
+# interchangeable: a session names a person and must pass the domain gate,
+# while the state token names no one. Running state through that gate rejected
+# every sign-in, so the two have separate entry points.
+STATE_SUBJECT = 'oauth-state'
+STATE_TTL = 300
+
+
+def make_token(email, hours=SESSION_HOURS):
+    return _sign(email, hours * 3600)
+
+
+def read_token(tok):
+    email = _unsign(tok)
+    if email is None or email == STATE_SUBJECT:
         return None
     if OAUTH_ON:
         return email if allowed(email) else None
     return email if email in USERS else None
+
+
+def make_state():
+    return _sign(STATE_SUBJECT, STATE_TTL)
+
+
+def check_state(tok):
+    return _unsign(tok) == STATE_SUBJECT
 
 
 def allowed(email):
@@ -105,7 +140,7 @@ def redirect_uri(host, scheme='https'):
 
 
 def start_url(host):
-    state = make_token('oauth-state', hours=0.05)     # ~3 min, signed
+    state = make_state()
     q = urlencode({
         'client_id': CLIENT_ID,
         'redirect_uri': redirect_uri(host),
@@ -128,7 +163,7 @@ def _decode_id_token(id_token):
 
 
 def finish(code, state, host):
-    if read_token(state) != 'oauth-state':
+    if not check_state(state):
         raise AuthError('লগ ইন লিঙ্কটি মেয়াদোত্তীর্ণ। আবার চেষ্টা করুন।')
     r = requests.post(TOKEN_URL, timeout=20, data={
         'code': code, 'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
