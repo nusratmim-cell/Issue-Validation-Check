@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 .vercel
 .env
-.env.*
+.env.local
+.env.production
 *.xlsx
 *.csv

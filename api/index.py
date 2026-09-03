@@ -10,6 +10,7 @@ Runs as a Vercel serverless function (`handler`) and locally via serve.py.
 import html
 import json
 import os
+import re
 import sys
 import time
 from http.cookies import SimpleCookie
@@ -22,6 +23,8 @@ import auth                                            # noqa: E402
 from store import DEGRADED, BusyError, store           # noqa: E402
 from upstream import Upstream                          # noqa: E402
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+LOGO = os.path.join(os.path.dirname(HERE), 'public', 'logo.svg')
 AUDIT_KEY = 'gpa5:audit'
 E = html.escape
 _up = None
@@ -45,44 +48,131 @@ def audit(user, action, detail, ip=''):
 
 
 # ---------------------------------------------------------------------------
+# which field actually matched
+#
+# The admin panel holds junk identifiers - three separate students share the
+# registration 0000000000 - so "found" alone is not proof CX has the right
+# person. Show what matched, and say so when one value maps to several.
+# ---------------------------------------------------------------------------
+BN_DIGITS = str.maketrans('০১২৩৪৫৬৭৮৯', '0123456789')
+
+
+def _digits(v):
+    return re.sub(r'\D', '', str(v or '').translate(BN_DIGITS))
+
+
+def matched_on(q, d):
+    qd = _digits(q)
+    if qd:
+        for label, val in (('রেজিস্ট্রেশন', d.get('registration') or d.get('reg_p')),
+                           ('রোল', d.get('roll') or d.get('roll_p')),
+                           ('মোবাইল', d.get('phone') or d.get('phone_p')),
+                           ('অভিভাবকের মোবাইল', d.get('gurdian_phone'))):
+            if val and _digits(val) == qd:
+                return label
+    qn = re.sub(r'\s+', '', str(q)).lower()
+    if qn and qn in re.sub(r'\s+', '', (d.get('name_bn') or '')).lower():
+        return 'নাম'
+    return 'আংশিক মিল'
+
+
+# ---------------------------------------------------------------------------
 # rendering
 # ---------------------------------------------------------------------------
 CSS = """
-*{box-sizing:border-box}body{margin:0;font-family:'Segoe UI',system-ui,'Noto Sans Bengali',sans-serif;background:#f4f6fa;color:#182230}
-header{background:#1e3a6d;color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
-header b{font-size:17px}header .who{font-size:13px;opacity:.9}
-header a{color:#cfe0ff;font-size:13px;margin-left:14px;text-decoration:none}
-header a:hover{text-decoration:underline}
-.wrap{max-width:1000px;margin:22px auto;padding:0 16px}
-.card{background:#fff;border:1px solid #e2e7f0;border-radius:10px;padding:20px;margin-bottom:16px}
-label{display:block;font-size:12px;font-weight:600;color:#54637a;margin-bottom:5px}
-input[type=text],input[type=password],textarea{width:100%;padding:11px 12px;border:1px solid #cbd4e2;border-radius:7px;font-size:15px;font-family:inherit}
-textarea{min-height:150px;resize:vertical}
-button{background:#1e3a6d;color:#fff;border:0;border-radius:7px;padding:11px 22px;font-size:15px;cursor:pointer}
-button:hover{background:#294d8f}button:disabled{background:#9aa7bd;cursor:not-allowed}
-button.alt{background:#fff;color:#1e3a6d;border:1px solid #1e3a6d}
-.gbtn{display:inline-flex;align-items:center;gap:10px;background:#fff;color:#3c4043;border:1px solid #dadce0;border-radius:7px;padding:12px 20px;font-size:15px;font-weight:600;text-decoration:none}
-.gbtn:hover{background:#f7f8f8}
-.row{display:flex;gap:12px;flex-wrap:wrap}.row>div{flex:1;min-width:150px}
-.hint{font-size:12.5px;color:#6b7a90;margin-top:10px;line-height:1.6}
-.verdict{border-radius:9px;padding:14px 16px;font-size:17px;font-weight:600;margin-bottom:14px}
-.yes{background:#e7f7ed;border:1px solid #9fd8b4;color:#14602f}
-.no{background:#fdeaea;border:1px solid #f0b4b4;color:#8c1c1c}
+:root{
+  --yellow:#efad1e; --red:#ee3d5e; --purple:#cf278d; --blue:#354894;
+  --ink:#1a1f36; --muted:#6b7590; --faint:#9aa3b8;
+  --line:#e8ebf2; --bg:#f6f7fb; --card:#fff;
+  --blue-soft:#eef1fa; --red-soft:#fdeef1; --yellow-soft:#fdf4e3;
+  --shadow:0 1px 2px rgba(26,31,54,.05), 0 10px 30px rgba(26,31,54,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:'Segoe UI',-apple-system,system-ui,'Noto Sans Bengali',sans-serif;
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--blue)}
+.brandbar{height:4px;background:linear-gradient(90deg,
+  var(--yellow) 0%, var(--red) 34%, var(--purple) 67%, var(--blue) 100%)}
+header{background:#fff;border-bottom:1px solid var(--line);
+  padding:14px 22px;display:flex;justify-content:space-between;
+  align-items:center;flex-wrap:wrap;gap:14px}
+header .brand{display:flex;align-items:center;gap:13px;min-width:0}
+header img{height:34px;width:auto;display:block}
+header .title{font-size:15px;font-weight:600;letter-spacing:-.01em;
+  padding-left:13px;border-left:1px solid var(--line);color:var(--ink)}
+nav{display:flex;align-items:center;gap:6px;font-size:13.5px}
+nav .who{color:var(--faint);margin-right:8px;font-size:13px}
+nav a{color:var(--muted);text-decoration:none;padding:7px 13px;border-radius:7px}
+nav a:hover{background:var(--blue-soft);color:var(--blue)}
+.wrap{max-width:1020px;margin:26px auto 60px;padding:0 18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:24px;margin-bottom:18px;box-shadow:var(--shadow)}
+h2{font-size:15px;font-weight:600;margin:0 0 18px;letter-spacing:-.01em}
+label{display:block;font-size:11.5px;font-weight:600;color:var(--muted);
+  margin-bottom:7px;letter-spacing:.02em;text-transform:uppercase}
+input[type=text],input[type=password],textarea{width:100%;padding:12px 14px;
+  border:1px solid #d5dbe7;border-radius:9px;font-size:15px;font-family:inherit;
+  background:#fff;color:var(--ink);transition:border-color .15s,box-shadow .15s}
+input:focus,textarea:focus{outline:0;border-color:var(--blue);
+  box-shadow:0 0 0 3px rgba(53,72,148,.12)}
+textarea{min-height:158px;resize:vertical;line-height:1.7}
+button{background:var(--blue);color:#fff;border:0;border-radius:9px;
+  padding:12px 24px;font-size:14.5px;font-weight:600;font-family:inherit;
+  cursor:pointer;transition:background .15s}
+button:hover{background:#2b3c7d}
+button:disabled{background:#b9c0d2;cursor:not-allowed}
+button.alt{background:#fff;color:var(--blue);border:1px solid #c9d1e4}
+button.alt:hover{background:var(--blue-soft)}
+.gbtn{display:inline-flex;align-items:center;gap:11px;background:#fff;
+  color:#3c4043;border:1px solid #dadce0;border-radius:9px;padding:13px 22px;
+  font-size:14.5px;font-weight:600;text-decoration:none;transition:box-shadow .15s}
+.gbtn:hover{box-shadow:0 1px 6px rgba(26,31,54,.14)}
+.row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
+.row>div{flex:1;min-width:170px}
+.hint{font-size:12.5px;color:var(--muted);margin-top:12px;line-height:1.7}
+.verdict{border-radius:11px;padding:15px 18px;font-size:16px;font-weight:600;
+  display:flex;align-items:center;gap:11px;letter-spacing:-.01em}
+.verdict .mark{width:24px;height:24px;border-radius:50%;flex:0 0 auto;
+  display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px}
+.v-yes{background:var(--blue-soft);color:var(--blue);border:1px solid #ccd5ee}
+.v-yes .mark{background:var(--blue)}
+.v-no{background:var(--red-soft);color:#b02545;border:1px solid #f6cdd6}
+.v-no .mark{background:var(--red)}
+.matched{font-size:12px;color:var(--muted);margin:12px 0 0}
+.matched b{color:var(--purple)}
 table{width:100%;border-collapse:collapse;font-size:14px}
-th{text-align:left;font-size:12px;color:#54637a;padding:8px 6px;border-bottom:2px solid #e2e7f0;white-space:nowrap}
-td{padding:8px 6px;border-bottom:1px solid #eef1f6;vertical-align:top}
-td.k{color:#6b7a90;width:190px;font-size:13px}
-.scroll{overflow-x:auto}
-.flags{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
-.flag{font-size:12.5px;padding:5px 11px;border-radius:20px;font-weight:600}
-.ok{background:#e7f7ed;color:#14602f}.bad{background:#fdeaea;color:#8c1c1c}
-.err{background:#fff6e5;border:1px solid #f0d09a;color:#7a4b00;padding:13px;border-radius:8px}
-.warn{background:#fff6e5;border:1px solid #f0d09a;color:#7a4b00;padding:11px 14px;border-radius:8px;font-size:13px;margin-bottom:16px}
-.meta{font-size:12px;color:#8a97a8;margin-top:12px}
-h2{font-size:16px;margin:0 0 14px}
-.pill{font-size:11.5px;padding:3px 9px;border-radius:20px;font-weight:600;white-space:nowrap}
-#bar{height:7px;background:#e2e7f0;border-radius:20px;overflow:hidden;margin:14px 0}
-#fill{height:100%;width:0;background:#1e3a6d;transition:width .3s}
+th{text-align:left;font-size:11px;font-weight:600;color:var(--muted);
+  padding:10px 8px;border-bottom:1px solid var(--line);white-space:nowrap;
+  text-transform:uppercase;letter-spacing:.03em}
+td{padding:10px 8px;border-bottom:1px solid #f1f3f8;vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.k{color:var(--muted);width:200px;font-size:12.5px}
+td.v{font-weight:500}
+.scroll{overflow-x:auto;margin-top:6px}
+.flags{display:flex;gap:9px;flex-wrap:wrap;margin:18px 0 6px}
+.flag{font-size:12px;padding:6px 13px;border-radius:20px;font-weight:600;
+  border:1px solid transparent}
+.flag.on{background:var(--blue-soft);color:var(--blue);border-color:#ccd5ee}
+.flag.off{background:#f4f5f9;color:var(--faint);border-color:var(--line)}
+.err{background:var(--yellow-soft);border:1px solid #f0dcae;color:#8a5a00;
+  padding:14px 16px;border-radius:10px;font-size:14px}
+.warn{background:var(--yellow-soft);border:1px solid #f0dcae;color:#8a5a00;
+  padding:12px 16px;border-radius:10px;font-size:13px;margin-bottom:18px}
+.meta{font-size:12px;color:var(--faint);margin-top:16px;
+  padding-top:14px;border-top:1px solid var(--line)}
+.meta a{color:var(--purple);text-decoration:none}.meta a:hover{text-decoration:underline}
+.pill{font-size:11.5px;padding:4px 10px;border-radius:20px;font-weight:600;white-space:nowrap}
+.pill.ok{background:var(--blue-soft);color:var(--blue)}
+.pill.bad{background:var(--red-soft);color:#b02545}
+.pill.err{background:var(--yellow-soft);color:#8a5a00}
+#bar{height:6px;background:var(--line);border-radius:20px;overflow:hidden;margin:18px 0}
+#fill{height:100%;width:0;border-radius:20px;transition:width .3s;
+  background:linear-gradient(90deg,var(--purple),var(--blue))}
+.status{font-size:13px;color:var(--muted)}
+.empty{color:var(--faint);font-size:13.5px;padding:8px 0}
+@media(max-width:560px){.card{padding:18px}header{padding:12px 16px}
+  header .title{display:none}td.k{width:130px}}
 """
 
 DEGRADED_BANNER = ('<div class="warn"><b>সতর্কতা:</b> Upstash Redis সেট করা নেই। '
@@ -94,13 +184,17 @@ DEGRADED_BANNER = ('<div class="warn"><b>সতর্কতা:</b> Upstash Redi
 def page(body, user=None, title='Issue Validation Check', script=''):
     nav = ''
     if user:
-        nav = (f'<div class="who">{E(user)}<a href="/">একজন</a>'
-               f'<a href="/bulk">বাল্ক চেক</a><a href="/logout">লগ আউট</a></div>')
+        nav = (f'<nav><span class="who">{E(user)}</span>'
+               f'<a href="/">একজন</a><a href="/bulk">বাল্ক চেক</a>'
+               f'<a href="/logout">লগ আউট</a></nav>')
     warn = DEGRADED_BANNER if (DEGRADED and user) else ''
     return (f'<!doctype html><html lang="bn"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{E(title)}</title><style>{CSS}</style></head><body>'
-            f'<header><b>GPA-5 Issue Validation Check</b>{nav}</header>'
+            f'<div class="brandbar"></div>'
+            f'<header><div class="brand">'
+            f'<img src="/logo.svg" alt="GPA-5 সংবর্ধনা">'
+            f'<span class="title">Issue Validation Check</span></div>{nav}</header>'
             f'<div class="wrap">{warn}{body}</div>{script}</body></html>').encode()
 
 
@@ -112,33 +206,33 @@ GOOGLE_G = ('<svg width="18" height="18" viewBox="0 0 48 48">'
 
 
 def login_page(msg=''):
-    warn = f'<div class="err" style="margin-bottom:14px">{E(msg)}</div>' if msg else ''
+    warn = f'<div class="err" style="margin-bottom:18px">{E(msg)}</div>' if msg else ''
     if auth.OAUTH_ON:
-        inner = (f'<p class="hint" style="margin:0 0 18px">আপনার '
-                 f'<b>@{E(auth.ALLOWED_DOMAIN)}</b> Google অ্যাকাউন্ট দিয়ে লগ ইন করুন।</p>'
+        inner = (f'<p class="hint" style="margin:0 0 22px">আপনার '
+                 f'<b>@{E(auth.ALLOWED_DOMAIN)}</b> Google অ্যাকাউন্ট দিয়ে সাইন ইন করুন।</p>'
                  f'<a class="gbtn" href="/auth/start">{GOOGLE_G} Google দিয়ে সাইন ইন</a>')
     else:
         inner = ('<form method="POST" action="/login">'
                  '<label>ইউজারনেম</label><input type="text" name="user" autofocus required>'
-                 '<div style="height:12px"></div>'
+                 '<div style="height:14px"></div>'
                  '<label>পাসওয়ার্ড</label><input type="password" name="pw" required>'
-                 '<div style="height:16px"></div><button type="submit">লগ ইন</button></form>'
+                 '<div style="height:20px"></div><button type="submit">লগ ইন</button></form>'
                  '<p class="hint">Google সাইন ইন কনফিগার করা নেই - লোকাল মোড।</p>')
-    return page(f'''{warn}<div class="card" style="max-width:430px;margin:40px auto">
+    return page(f'''{warn}<div class="card" style="max-width:440px;margin:52px auto">
       <h2>লগ ইন</h2>{inner}</div>''')
 
 
 def flag(label, val):
     on = val == 1
-    return f'<span class="flag {"ok" if on else "bad"}">{label}: {"হ্যাঁ" if on else "না"}</span>'
+    return f'<span class="flag {"on" if on else "off"}">{E(label)} · {"হ্যাঁ" if on else "না"}</span>'
 
 
 def row(k, v):
-    return (f'<tr><td class="k">{E(k)}</td><td>{E(str(v))}</td></tr>'
+    return (f'<tr><td class="k">{E(k)}</td><td class="v">{E(str(v))}</td></tr>'
             if v not in (None, '', 'None') else '')
 
 
-def render_student(d, cached):
+def render_student(d, cached, q='', ambiguous=False):
     """Everything below is what the admin panel holds - board, roll and
     registration as stored there, never as CX or the student typed them."""
     rows = ''.join([
@@ -162,20 +256,26 @@ def render_student(d, cached):
              + flag('পাসওয়ার্ড সেট', d.get('is_password_set'))
              + flag('অ্যাকাউন্ট Active', d.get('is_active'))
              + flag('রেজাল্ট আছে', d.get('has_result')))
+    match = (f'<p class="matched">মিলেছে <b>{E(matched_on(q, d))}</b> দিয়ে।'
+             + (' একই তথ্যে একাধিক শিক্ষার্থী আছে - নিচের সব কটি দেখে নিশ্চিত হোন।'
+                if ambiguous else '') + '</p>') if q else ''
     src = 'ক্যাশ থেকে' if cached else 'এইমাত্র admin panel থেকে'
     link = f'https://www.gpa5reception.com/student-data/{E(str(d.get("sid")))}'
     return f'''<div class="card">
-      <div class="verdict yes">✓ প্রোফাইল তৈরি আছে - অ্যাকাউন্টও আছে</div>
+      <div class="verdict v-yes"><span class="mark">✓</span>
+        প্রোফাইল তৈরি আছে - অ্যাকাউন্টও আছে</div>
+      {match}
       <div class="flags">{flags}</div>
       <div class="scroll"><table>{rows}</table></div>
-      <div class="meta">ডেটা: {src} · <a href="{link}" target="_blank" rel="noopener">admin panel এ খুলুন</a></div>
+      <div class="meta">ডেটা: {src} · <a href="{link}" target="_blank" rel="noopener">admin panel এ খুলুন ↗</a></div>
     </div>'''
 
 
 NOT_FOUND = '''<div class="card">
-  <div class="verdict no">✗ প্রোফাইল পাওয়া যায়নি - এই তথ্যে কোনো অ্যাকাউন্ট নেই</div>
-  <div class="hint">রেজিস্ট্রেশন নম্বর দিয়ে আরেকবার চেষ্টা করুন। তাতেও না পেলে
-  শিক্ষার্থী এখনো রেজিস্ট্রেশন সম্পন্ন করেনি - নতুন করে রেজিস্ট্রেশন করতে বলুন।</div>
+  <div class="verdict v-no"><span class="mark">✕</span>
+    প্রোফাইল পাওয়া যায়নি - এই তথ্যে কোনো অ্যাকাউন্ট নেই</div>
+  <p class="hint">রেজিস্ট্রেশন নম্বর দিয়ে আরেকবার চেষ্টা করুন। তাতেও না পেলে
+  শিক্ষার্থী এখনো রেজিস্ট্রেশন সম্পন্ন করেনি - নতুন করে রেজিস্ট্রেশন করতে বলুন।</p>
 </div>'''
 
 
@@ -185,18 +285,19 @@ def search_page(user, q='', body=''):
       <form method="GET" action="/">
         <div class="row">
           <div><label>রোল / রেজিস্ট্রেশন / মোবাইল / নাম</label>
-               <input type="text" name="q" value="{E(q)}" autofocus required></div>
-          <div style="flex:0 0 auto;align-self:flex-end"><button type="submit">খুঁজুন</button></div>
+               <input type="text" name="q" value="{E(q)}" autofocus required
+                      placeholder="যেমন 2310929381"></div>
+          <div style="flex:0 0 auto"><button type="submit">খুঁজুন</button></div>
         </div>
       </form>
-      <div class="hint">নাম দিয়েও খোঁজা যায়, তবে একই নামে একাধিক শিক্ষার্থী থাকতে পারে -
-      নিশ্চিত হতে <b>রেজিস্ট্রেশন নম্বর</b> ব্যবহার করুন।<br>
-      অনেকজন একসাথে দেখতে <a href="/bulk">বাল্ক চেক</a> ব্যবহার করুন।</div>
+      <p class="hint">নাম দিয়েও খোঁজা যায়, তবে একই নামে একাধিক শিক্ষার্থী থাকতে পারে -
+      নিশ্চিত হতে <b>রেজিস্ট্রেশন নম্বর</b> ব্যবহার করুন।
+      অনেকজন একসাথে দেখতে <a href="/bulk">বাল্ক চেক</a> ব্যবহার করুন।</p>
     </div>{body}''', user)
 
 
 BULK_JS = """<script>
-const COLS = ['যা দিয়ে খোঁজা','প্রোফাইল আছে?','নাম (admin)','বোর্ড (admin)',
+const COLS = ['যা দিয়ে খোঁজা','প্রোফাইল আছে?','মিলেছে','নাম (admin)','বোর্ড (admin)',
 'রোল (admin)','রেজিস্ট্রেশন (admin)','মোবাইল','গ্রুপ','জেন্ডার','প্রতিষ্ঠান',
 'নিজ জেলা','সংবর্ধনার জেলা','প্রোফাইল সম্পূর্ণ','পাসওয়ার্ড সেট','Active',
 'রেজাল্ট আছে','Admin ID'];
@@ -206,11 +307,12 @@ function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s
 function yn(v){return v===1?'হ্যাঁ':'না';}
 
 function draw(){
-  document.getElementById('out').innerHTML =
-    '<div class="scroll"><table><tr>'+COLS.map(c=>'<th>'+c+'</th>').join('')+'</tr>'+
+  const el = document.getElementById('out');
+  if(!rows.length){el.innerHTML='<div class="empty">এখনো কিছু চেক করা হয়নি।</div>';return;}
+  el.innerHTML='<div class="scroll"><table><tr>'+COLS.map(c=>'<th>'+c+'</th>').join('')+'</tr>'+
     rows.map(r=>'<tr>'+r.map(function(c,i){
-      if(i===1){var ok=(c==='হ্যাঁ');
-        return '<td><span class="pill '+(ok?'ok':'bad')+'">'+esc(c)+'</span></td>';}
+      if(i===1){var k=c==='হ্যাঁ'?'ok':(c==='না'?'bad':'err');
+        return '<td><span class="pill '+k+'">'+esc(c)+'</span></td>';}
       return '<td>'+esc(c)+'</td>';}).join('')+'</tr>').join('')+'</table></div>';
 }
 
@@ -224,17 +326,17 @@ async function run(){
   document.getElementById('dl').style.display='none';
   for(let i=0;i<raw.length;i++){
     if(halted) break;
-    document.getElementById('status').textContent=(i+1)+' / '+raw.length+' - '+raw[i];
+    document.getElementById('status').textContent=(i+1)+' / '+raw.length+' — '+raw[i];
     document.getElementById('fill').style.width=(i/raw.length*100)+'%';
     let r;
     try{ r = await (await fetch('/check?q='+encodeURIComponent(raw[i]))).json(); }
     catch(e){ r = {error:'নেটওয়ার্ক সমস্যা'}; }
     const blank = new Array(15).fill('');
-    if(r.error){ rows.push([raw[i],'ত্রুটি',r.error].concat(blank.slice(1))); }
-    else if(!r.students || !r.students.length){ rows.push([raw[i],'না'].concat(blank)); }
+    if(r.error){ rows.push([raw[i],'ত্রুটি',r.error].concat(blank)); }
+    else if(!r.students || !r.students.length){ rows.push([raw[i],'না',''].concat(blank)); }
     else{
       for(const d of r.students){
-        rows.push([raw[i],'হ্যাঁ',d.name_bn||'',d.board_bn||d.board||'',
+        rows.push([raw[i],'হ্যাঁ',d._matched||'',d.name_bn||'',d.board_bn||d.board||'',
           d.roll||d.roll_p||'',d.registration||d.reg_p||'',d.phone||d.phone_p||'',
           d.study_group||'',d.gender||'',d.institute_name||'',d.district_bn||'',
           d.venue_district_bn||'',yn(d.is_update_profile),yn(d.is_password_set),
@@ -245,7 +347,7 @@ async function run(){
   }
   document.getElementById('fill').style.width='100%';
   document.getElementById('status').textContent =
-    'শেষ - '+rows.length+' টি ফলাফল'+(halted?' (থামানো হয়েছে)':'');
+    'শেষ — '+rows.length+' টি ফলাফল'+(halted?' (থামানো হয়েছে)':'');
   document.getElementById('go').disabled=false;
   document.getElementById('halt').style.display='none';
   if(rows.length) document.getElementById('dl').style.display='inline-block';
@@ -260,25 +362,26 @@ function download(){
   a.download='validation-check-'+new Date().toISOString().slice(0,10)+'.csv';
   a.click();
 }
+window.addEventListener('DOMContentLoaded',draw);
 </script>"""
 
 
 def bulk_page(user):
     return page('''<div class="card">
       <h2>বাল্ক চেক</h2>
-      <label>প্রতি লাইনে একটি - রোল / রেজিস্ট্রেশন / মোবাইল / নাম</label>
+      <label>প্রতি লাইনে একটি — রোল / রেজিস্ট্রেশন / মোবাইল / নাম</label>
       <textarea id="list" placeholder="2310929381&#10;2310937742&#10;01752770779"></textarea>
-      <div class="hint">Excel এর একটি কলাম কপি করে সরাসরি পেস্ট করতে পারেন।
+      <p class="hint">Excel এর একটি কলাম কপি করে সরাসরি পেস্ট করতে পারেন।
       admin panel রক্ষা করতে একেকটি একে একে পাঠানো হয় (১.৫ সেকেন্ড বিরতি),
-      তাই ৫০ জনে প্রায় দেড় মিনিট লাগবে - পেজটি খোলা রাখুন।</div>
+      তাই ৫০ জনে প্রায় দেড় মিনিট লাগবে — পেজটি খোলা রাখুন।</p>
       <div id="bar"><div id="fill"></div></div>
-      <div class="row" style="align-items:center">
+      <div class="row">
         <div style="flex:0 0 auto"><button id="go" onclick="run()">চেক শুরু করুন</button></div>
         <div style="flex:0 0 auto"><button id="halt" class="alt" style="display:none"
              onclick="halted=true">থামান</button></div>
         <div style="flex:0 0 auto"><button id="dl" class="alt" style="display:none"
              onclick="download()">CSV ডাউনলোড</button></div>
-        <div style="font-size:13px;color:#6b7a90" id="status"></div>
+        <div class="status" id="status"></div>
       </div>
     </div>
     <div class="card"><h2>ফলাফল</h2><div id="out"></div></div>''',
@@ -294,14 +397,15 @@ class handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):
         pass
 
-    def _send(self, body, code=200, cookie=None, ctype='text/html; charset=utf-8'):
+    def _send(self, body, code=200, cookie=None, ctype='text/html; charset=utf-8',
+              cache='no-store'):
         self.send_response(code)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'DENY')
         self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Cache-Control', cache)
         if cookie:
             self.send_header('Set-Cookie', cookie)
         self.end_headers()
@@ -343,6 +447,14 @@ class handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path = u.path.rstrip('/') or '/'
         qs = parse_qs(u.query)
+
+        if path == '/logo.svg':                 # Vercel serves public/ directly;
+            try:                                # this covers the local runner
+                with open(LOGO, 'rb') as f:
+                    return self._send(f.read(), ctype='image/svg+xml',
+                                      cache='public, max-age=86400')
+            except OSError:
+                return self._send(b'', 404)
 
         if path == '/health':
             return self._json({'ok': True, 'shared_state': not DEGRADED,
@@ -396,7 +508,12 @@ class handler(BaseHTTPRequestHandler):
                 audit(user, 'check_error', {'q': q, 'err': str(e)}, self._ip())
                 return self._json({'error': str(e)}, 502)
             audit(user, 'check', {'q': q, 'found': len(res)}, self._ip())
-            return self._json({'students': [d for d, _ in res]})
+            out = []
+            for d, _ in res:
+                d = dict(d)
+                d['_matched'] = matched_on(q, d)
+                out.append(d)
+            return self._json({'students': out})
 
         if path != '/':
             return self._send(page('<div class="card">পেজ পাওয়া যায়নি</div>', user), 404)
@@ -414,7 +531,8 @@ class handler(BaseHTTPRequestHandler):
                     f'<br>{E(str(e))}<br><br>কিছুক্ষণ পর আবার চেষ্টা করুন।</div></div>')
             return self._send(search_page(user, q, body))
         audit(user, 'search', {'q': q, 'found': len(results)}, self._ip())
-        body = ''.join(render_student(d, c) for d, c in results) or NOT_FOUND
+        many = len(results) > 1
+        body = ''.join(render_student(d, c, q, many) for d, c in results) or NOT_FOUND
         self._send(search_page(user, q, body))
 
     def do_POST(self):
