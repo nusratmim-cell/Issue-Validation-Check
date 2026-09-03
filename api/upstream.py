@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 import requests
 
-from store import Pacer, store
+from store import LOCK_WAIT, Pacer, store
 
 BASE = 'https://www.gpa5reception.com'
 
@@ -25,6 +25,13 @@ BASE = 'https://www.gpa5reception.com'
 # retry could ask for well over that, so a slow admin panel produced a blank
 # 504 from Vercel instead of our own message. Every request now draws from one
 # per-invocation budget and we stop while there is still time to explain why.
+# Cache TTLs. Student records barely move during the event, and the card tells
+# CX whether a row came from cache ('সংরক্ষিত তথ্য') or was fetched just now, so
+# a longer window is honest as well as faster. Repeat and overlapping lookups -
+# duplicated numbers in the sheet, two agents on the same student - then cost
+# the panel nothing instead of 1.5s each of a 40/min fleet-wide budget.
+QUERY_TTL = 300          # a search's matching ids
+DETAIL_TTL = 900         # one student's full record
 BUDGET = 42.0            # seconds of upstream time per incoming request
 TIMEOUT = 15             # cap for any single upstream request
 MIN_ATTEMPT = 4.0        # below this there is no point starting another call
@@ -82,11 +89,13 @@ class Upstream:
         self.s = requests.Session()
         self.s.headers['User-Agent'] = 'Mozilla/5.0 Chrome/128'
         self._deadline = None
+        self._turns_left = 1
         self._restore()
 
     # -- time budget ---------------------------------------------------------
     def start_budget(self, seconds=BUDGET):
         self._deadline = time.monotonic() + seconds
+        self._turns_left = 1
 
     def _left(self):
         if self._deadline is None:
@@ -99,6 +108,22 @@ class Upstream:
         if left < MIN_ATTEMPT:
             raise AdminError('admin panel read timed out - no budget left')
         return min(TIMEOUT, left)
+
+    def _gate_wait(self):
+        """How long we may queue for one paced turn.
+
+        A flat 8s made ten agents fail rather than wait: a lookup costs two
+        turns or more, and at ~36 turns/min fleet-wide the later turns get
+        refused well before 8s is up. Spending the whole budget on the first
+        turn is just as bad - measured, it starved the rest to 0.5s and made
+        six-turn name searches fail outright.
+
+        So share what is left between the turns still to come. Each turn waits
+        an equal slice, the slice grows as the work shrinks, and the total can
+        never exceed what this invocation can afford.
+        """
+        share = (self._left() - MIN_ATTEMPT) / max(1, self._turns_left)
+        return max(0.5, min(LOCK_WAIT, share))
 
     # -- session shared across instances -------------------------------------
     def _restore(self):
@@ -125,12 +150,12 @@ class Upstream:
     def login(self):
         if not self.email or not self.password:
             raise AdminError('ADMIN_EMAIL / ADMIN_PASSWORD are not set on the server')
-        with Pacer():
+        with Pacer(wait=self._gate_wait()):
             r = self.s.get(BASE + '/login', timeout=self._timeout())
         m = re.search(r'name="_token" value="([^"]+)"', r.text)
         if not m:
             raise AdminError('login page has no CSRF token')
-        with Pacer():
+        with Pacer(wait=self._gate_wait()):
             self.s.post(BASE + '/login', timeout=self._timeout(), data={
                 '_token': m.group(1), 'email': self.email,
                 'password': self.password})
@@ -141,7 +166,8 @@ class Upstream:
         for attempt in (1, 2):
             if not self.s.cookies:
                 self.login()
-            with Pacer():
+            with Pacer(wait=self._gate_wait()):
+                self._turns_left = max(1, self._turns_left - 1)
                 r = self.s.get(BASE + path, timeout=self._timeout())
             if r.status_code == 200 and 'Please Sign In' not in r.text:
                 return r
@@ -172,28 +198,35 @@ class Upstream:
         d['sid'] = sid
         return d
 
-    def lookup(self, query, limit=5, cache_ttl=120):
+    def lookup(self, query, limit=5, cache_ttl=DETAIL_TTL):
         """Search then fetch details, using the shared cache where possible."""
         key = f'gpa5:q:{query.strip().lower()}'
         try:
             ids = store.get(key)
         except Exception:
             ids = None
+        # Worst case before we know how many students matched: the search plus a
+        # detail for each. Corrected below once the ids are in hand.
+        self._turns_left = 1 + limit
         if ids is None:
             ids = self.search_ids(query)
             try:
-                store.set(key, ids, ex=60)
+                store.set(key, ids, ex=QUERY_TTL)
             except Exception:
                 pass
 
+        want = ids[:limit]
+        self._turns_left = max(1, len(want))
         out = []
-        for sid in ids[:limit]:
+        for sid in want:
             dkey = f'gpa5:d:{sid}'
             try:
                 d = store.get(dkey)
             except Exception:
                 d = None
             cached = d is not None
+            if cached:                       # a cache hit costs the panel no
+                self._turns_left = max(1, self._turns_left - 1)   # turn at all
             if d is None:
                 d = self.detail(sid)
                 try:

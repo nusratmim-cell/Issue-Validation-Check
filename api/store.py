@@ -28,7 +28,7 @@ URL = os.environ.get('UPSTASH_REDIS_REST_URL', '').rstrip('/')
 TOKEN = os.environ.get('UPSTASH_REDIS_REST_TOKEN', '')
 
 MIN_GAP = 1.5            # seconds between ANY two upstream requests
-LOCK_WAIT = 8.0
+LOCK_WAIT = 30.0         # ceiling only; callers pass what their budget allows
 
 GAP_KEY = 'gpa5:gap'
 
