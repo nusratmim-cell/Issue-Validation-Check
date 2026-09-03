@@ -163,8 +163,8 @@ class Pacer:
             except Exception:
                 ttl = 0.2
             time.sleep(min(max(ttl, 0.05) + random.uniform(.02, .3), left))
-        raise BusyError('সবাই একসাথে সার্চ করছেন। admin panel রক্ষা করতে '
-                        'প্রতিটি রিকোয়েস্ট একে একে পাঠানো হয় - আবার চেষ্টা করুন।')
+        raise BusyError('এখন একসাথে অনেকজন খুঁজছেন। '
+                        'কিছুক্ষণ পর আবার চেষ্টা করুন।')
 
     def __exit__(self, *exc):
         return False

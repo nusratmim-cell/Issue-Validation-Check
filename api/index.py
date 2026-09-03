@@ -46,12 +46,13 @@ def friendly(e):
     to the audit log for whoever is debugging."""
     t = str(e)
     if 'timed out' in t.lower() or 'timeout' in t.lower():
-        return ('admin panel এখন খুব ধীরে সাড়া দিচ্ছে, তাই উত্তর আসেনি। '
-                'কয়েক সেকেন্ড পর আবার খুঁজুন — সাধারণত পরের চেষ্টায় কাজ করে।')
+        return ('সার্ভার এখন ধীরে সাড়া দিচ্ছে, তাই ফলাফল আসেনি। '
+                'কয়েক সেকেন্ড পর আবার খুঁজুন।')
     if 'login' in t.lower() or 'password' in t.lower():
-        return 'admin panel এ লগ ইন করা যায়নি। Shikho Tech কে জানান।'
-    return ('admin panel এ পৌঁছানো যায়নি। কিছুক্ষণ পর আবার চেষ্টা করুন। '
-            'বারবার হলে Shikho Tech কে জানান।')
+        return ('সার্ভারে সংযোগ করা যাচ্ছে না। '
+                'Shikho Tech টিমকে জানান।')
+    return ('এখন ফলাফল আনা যাচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন। '
+            'বারবার হলে Shikho Tech টিমকে জানান।')
 
 
 def audit(user, action, detail, ip=''):
@@ -218,10 +219,9 @@ td.v.id{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13.5
   header .title{display:none}td.k{width:140px}.wrap{padding:0 14px}}
 """
 
-DEGRADED_BANNER = ('<div class="warn"><b>সতর্কতা:</b> Upstash Redis সেট করা নেই। '
-                   'তখন প্রতিটি সার্ভার ইনস্ট্যান্স আলাদাভাবে গতি নিয়ন্ত্রণ করে, '
-                   'তাই ১০ জন একসাথে সার্চ করলে admin panel ডাউন হয়ে যেতে পারে। '
-                   'UPSTASH_REDIS_REST_URL ও TOKEN যোগ করুন।</div>')
+DEGRADED_BANNER = ('<div class="warn"><b>সতর্কতা:</b> সার্ভারের একটি সেটিং '
+                   'অসম্পূর্ণ। এই অবস্থায় একসাথে অনেকজন খুঁজলে ফলাফল আসতে '
+                   'সমস্যা হতে পারে। Shikho Tech টিমকে জানান।</div>')
 
 
 def page(body, user=None, title='Issue Validation Check', script=''):
@@ -307,7 +307,7 @@ def login_page(msg=''):
         # Google is not configured on this deployment, so the portal falls back
         # to the CX_USERS password list. Say so plainly rather than silently
         # showing a different login than the one people were told to expect.
-        body = (f'<p class="sub">Google সাইন ইন এই ডিপ্লয়মেন্টে সেট করা নেই — '
+        body = (f'<p class="sub">Google সাইন ইন এখানে চালু নেই — '
                 f'পাসওয়ার্ড দিয়ে লগ ইন করুন।</p>{alert}'
                 f'<form class="pwform" method="POST" action="/login">'
                 f'<div><label>ইউজারনেম</label>'
@@ -330,8 +330,8 @@ def flag(label, val):
     return f'<span class="flag {"on" if on else "off"}">{E(label)} · {"হ্যাঁ" if on else "না"}</span>'
 
 
-IDENT = {'রোল (admin)', 'রেজিস্ট্রেশন (admin)', 'মোবাইল',
-         'অভিভাবকের মোবাইল', 'Reg ID', 'Admin ID', 'শেষ আপডেট'}
+IDENT = {'রোল', 'রেজিস্ট্রেশন', 'মোবাইল', 'অভিভাবকের মোবাইল',
+         'রেজিস্ট্রেশন আইডি', 'প্যানেল আইডি', 'শেষ আপডেট'}
 
 
 def row(k, v):
@@ -347,46 +347,47 @@ def render_student(d, cached, q='', ambiguous=False):
     """Everything below is what the admin panel holds - board, roll and
     registration as stored there, never as CX or the student typed them."""
     rows = ''.join([
-        row('নাম (admin)', d.get('name_bn')),
-        row('বোর্ড (admin)', d.get('board_bn') or d.get('board')),
-        row('রোল (admin)', d.get('roll') or d.get('roll_p')),
-        row('রেজিস্ট্রেশন (admin)', d.get('registration') or d.get('reg_p')),
+        row('নাম', d.get('name_bn')),
+        row('বোর্ড', d.get('board_bn') or d.get('board')),
+        row('রোল', d.get('roll') or d.get('roll_p')),
+        row('রেজিস্ট্রেশন', d.get('registration') or d.get('reg_p')),
         row('মোবাইল', d.get('phone') or d.get('phone_p')),
         row('অভিভাবকের মোবাইল', d.get('gurdian_phone')),
         row('গ্রুপ', d.get('study_group')),
-        row('জেন্ডার', d.get('gender')),
+        row('লিঙ্গ', d.get('gender')),
         row('প্রতিষ্ঠান', d.get('institute_name')),
         row('উপজেলা', d.get('upazila_bn') or d.get('upazila')),
         row('নিজ জেলা', d.get('district_bn')),
         row('সংবর্ধনার জেলা', d.get('venue_district_bn')),
-        row('Reg ID', d.get('regid_p')),
+        row('রেজিস্ট্রেশন আইডি', d.get('regid_p')),
         row('শেষ আপডেট', (d.get('updated_at') or '')[:10]),
-        row('Admin ID', d.get('sid')),
+        row('প্যানেল আইডি', d.get('sid')),
     ])
     flags = (flag('প্রোফাইল সম্পূর্ণ', d.get('is_update_profile'))
              + flag('পাসওয়ার্ড সেট', d.get('is_password_set'))
-             + flag('অ্যাকাউন্ট Active', d.get('is_active'))
+             + flag('অ্যাকাউন্ট সক্রিয়', d.get('is_active'))
              + flag('রেজাল্ট আছে', d.get('has_result')))
     match = (f'<p class="matched">মিলেছে <b>{E(matched_on(q, d))}</b> দিয়ে।'
-             + (' একই তথ্যে একাধিক শিক্ষার্থী আছে - নিচের সব কটি দেখে নিশ্চিত হোন।'
+             + (' একই তথ্যে একাধিক শিক্ষার্থী আছে — নিচের সবগুলো দেখে নিশ্চিত হোন।'
                 if ambiguous else '') + '</p>') if q else ''
-    src = 'ক্যাশ থেকে' if cached else 'এইমাত্র admin panel থেকে'
+    src = 'সংরক্ষিত তথ্য' if cached else 'এইমাত্র নেওয়া'
     link = f'https://www.gpa5reception.com/student-data/{E(str(d.get("sid")))}'
     return f'''<div class="card">
       <div class="verdict v-yes"><span class="mark">✓</span>
-        প্রোফাইল তৈরি আছে - অ্যাকাউন্টও আছে</div>
+        প্রোফাইল পাওয়া গেছে — অ্যাকাউন্ট আছে</div>
       {match}
       <div class="flags">{flags}</div>
       <div class="scroll"><table>{rows}</table></div>
-      <div class="meta">ডেটা: {src} · <a href="{link}" target="_blank" rel="noopener">admin panel এ খুলুন ↗</a></div>
+      <div class="meta">তথ্য প্যানেলে যেভাবে সংরক্ষিত আছে · {src} ·
+        <a href="{link}" target="_blank" rel="noopener">প্যানেলে খুলুন ↗</a></div>
     </div>'''
 
 
 NOT_FOUND = '''<div class="card">
   <div class="verdict v-no"><span class="mark">✕</span>
-    প্রোফাইল পাওয়া যায়নি - এই তথ্যে কোনো অ্যাকাউন্ট নেই</div>
-  <p class="hint">রেজিস্ট্রেশন নম্বর দিয়ে আরেকবার চেষ্টা করুন। তাতেও না পেলে
-  শিক্ষার্থী এখনো রেজিস্ট্রেশন সম্পন্ন করেনি - নতুন করে রেজিস্ট্রেশন করতে বলুন।</p>
+    প্রোফাইল পাওয়া যায়নি — এই তথ্যে কোনো অ্যাকাউন্ট নেই</div>
+  <p class="hint">রেজিস্ট্রেশন নম্বর দিয়ে আরেকবার চেষ্টা করুন। তাতেও না পাওয়া গেলে
+  শিক্ষার্থীর রেজিস্ট্রেশন সম্পন্ন হয়নি — নতুন করে রেজিস্ট্রেশন করতে বলুন।</p>
 </div>'''
 
 
@@ -401,17 +402,17 @@ def search_page(user, q='', body=''):
           <div style="flex:0 0 auto"><button type="submit">খুঁজুন</button></div>
         </div>
       </form>
-      <p class="hint">নাম দিয়েও খোঁজা যায়, তবে একই নামে একাধিক শিক্ষার্থী থাকতে পারে -
+      <p class="hint">নাম দিয়েও খোঁজা যায়, তবে একই নামে একাধিক শিক্ষার্থী থাকতে পারে।
       নিশ্চিত হতে <b>রেজিস্ট্রেশন নম্বর</b> ব্যবহার করুন।
-      অনেকজন একসাথে দেখতে <a href="/bulk">বাল্ক চেক</a> ব্যবহার করুন।</p>
+      একসাথে অনেকজন দেখতে <a href="/bulk">বাল্ক চেক</a> ব্যবহার করুন।</p>
     </div>{body}''', user)
 
 
 BULK_JS = """<script>
-const COLS = ['যা দিয়ে খোঁজা','প্রোফাইল আছে?','মিলেছে','নাম (admin)','বোর্ড (admin)',
-'রোল (admin)','রেজিস্ট্রেশন (admin)','মোবাইল','গ্রুপ','জেন্ডার','প্রতিষ্ঠান',
-'নিজ জেলা','সংবর্ধনার জেলা','প্রোফাইল সম্পূর্ণ','পাসওয়ার্ড সেট','Active',
-'রেজাল্ট আছে','Admin ID'];
+const COLS = ['খোঁজার তথ্য','প্রোফাইল','মিলেছে','নাম','বোর্ড',
+'রোল','রেজিস্ট্রেশন','মোবাইল','গ্রুপ','লিঙ্গ','প্রতিষ্ঠান',
+'নিজ জেলা','সংবর্ধনার জেলা','প্রোফাইল সম্পূর্ণ','পাসওয়ার্ড সেট','অ্যাকাউন্ট সক্রিয়',
+'রেজাল্ট আছে','প্যানেল আইডি'];
 let rows = [], halted = false;
 
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
@@ -419,7 +420,7 @@ function yn(v){return v===1?'হ্যাঁ':'না';}
 
 function draw(){
   const el = document.getElementById('out');
-  if(!rows.length){el.innerHTML='<div class="empty">এখনো কিছু চেক করা হয়নি।</div>';return;}
+  if(!rows.length){el.innerHTML='<div class="empty">এখনো কোনো যাচাই করা হয়নি।</div>';return;}
   el.innerHTML='<div class="scroll"><table><tr>'+COLS.map(c=>'<th>'+c+'</th>').join('')+'</tr>'+
     rows.map(r=>'<tr>'+r.map(function(c,i){
       if(i===1){var k=c==='হ্যাঁ'?'ok':(c==='না'?'bad':'err');
@@ -430,7 +431,7 @@ function draw(){
 async function run(){
   const raw = document.getElementById('list').value.split(/[\\n,;\\t]+/)
               .map(s=>s.trim()).filter(Boolean);
-  if(!raw.length){alert('আগে তালিকা দিন');return;}
+  if(!raw.length){alert('আগে তালিকাটি পেস্ট করুন।');return;}
   rows=[];halted=false;
   document.getElementById('go').disabled=true;
   document.getElementById('halt').style.display='inline-block';
@@ -441,9 +442,9 @@ async function run(){
     document.getElementById('fill').style.width=(i/raw.length*100)+'%';
     let r;
     try{ r = await (await fetch('/check?q='+encodeURIComponent(raw[i]))).json(); }
-    catch(e){ r = {error:'নেটওয়ার্ক সমস্যা'}; }
+    catch(e){ r = {error:'ইন্টারনেট সংযোগে সমস্যা'}; }
     const blank = new Array(15).fill('');
-    if(r.error){ rows.push([raw[i],'ত্রুটি',r.error].concat(blank)); }
+    if(r.error){ rows.push([raw[i],'সমস্যা',r.error].concat(blank)); }
     else if(!r.students || !r.students.length){ rows.push([raw[i],'না',''].concat(blank)); }
     else{
       for(const d of r.students){
@@ -458,7 +459,7 @@ async function run(){
   }
   document.getElementById('fill').style.width='100%';
   document.getElementById('status').textContent =
-    'শেষ — '+rows.length+' টি ফলাফল'+(halted?' (থামানো হয়েছে)':'');
+    'যাচাই শেষ — '+rows.length+'টি ফলাফল'+(halted?' (থামানো হয়েছে)':'');
   document.getElementById('go').disabled=false;
   document.getElementById('halt').style.display='none';
   if(rows.length) document.getElementById('dl').style.display='inline-block';
@@ -482,9 +483,9 @@ def bulk_page(user):
       <h2>বাল্ক চেক</h2>
       <label>প্রতি লাইনে একটি — রোল / রেজিস্ট্রেশন / মোবাইল / নাম</label>
       <textarea id="list" placeholder="2310929381&#10;2310937742&#10;01752770779"></textarea>
-      <p class="hint">Excel এর একটি কলাম কপি করে সরাসরি পেস্ট করতে পারেন।
-      admin panel রক্ষা করতে একেকটি একে একে পাঠানো হয় (১.৫ সেকেন্ড বিরতি),
-      তাই ৫০ জনে প্রায় দেড় মিনিট লাগবে — পেজটি খোলা রাখুন।</p>
+      <p class="hint">Excel থেকে একটি কলাম কপি করে সরাসরি পেস্ট করতে পারেন।
+      একজন করে যাচাই হয়, তাই ৫০ জনে প্রায় ৩ মিনিট সময় লাগে —
+      যাচাই শেষ হওয়া পর্যন্ত পেজটি খোলা রাখুন।</p>
       <div id="bar"><div id="fill"></div></div>
       <div class="row">
         <div style="flex:0 0 auto"><button id="go" onclick="run()">চেক শুরু করুন</button></div>
@@ -613,7 +614,7 @@ class handler(BaseHTTPRequestHandler):
         user = self._user()
         if not user:
             if path == '/check':
-                return self._json({'error': 'সেশন শেষ - আবার লগ ইন করুন'}, 401)
+                return self._json({'error': 'সেশন শেষ হয়ে গেছে। আবার লগ ইন করুন।'}, 401)
             return self._send(login_page())
 
         if path == '/logout':
@@ -633,8 +634,11 @@ class handler(BaseHTTPRequestHandler):
             except BusyError as e:
                 return self._json({'error': str(e)}, 429)
             except Exception as e:
+                # CX reads this straight out of the বাল্ক চেক table, so it must
+                # be the same plain-Bangla message the single search shows. The
+                # exception text stays in the audit log.
                 audit(user, 'check_error', {'q': q, 'err': str(e)}, self._ip())
-                return self._json({'error': str(e)}, 502)
+                return self._json({'error': friendly(e)}, 502)
             audit(user, 'check', {'q': q, 'found': len(res)}, self._ip())
             out = []
             for d, _ in res:
@@ -644,7 +648,7 @@ class handler(BaseHTTPRequestHandler):
             return self._json({'students': out})
 
         if path != '/':
-            return self._send(page('<div class="card">পেজ পাওয়া যায়নি</div>', user), 404)
+            return self._send(page('<div class="card">পেজটি পাওয়া যায়নি।</div>', user), 404)
 
         if not q:
             return self._send(search_page(user))

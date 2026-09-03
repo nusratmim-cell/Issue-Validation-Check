@@ -97,7 +97,7 @@ class Upstream:
         """How long this call may take, or refuse if there is no time left."""
         left = self._left()
         if left < MIN_ATTEMPT:
-            raise AdminError('admin panel সময়মতো সাড়া দেয়নি')
+            raise AdminError('admin panel read timed out - no budget left')
         return min(TIMEOUT, left)
 
     # -- session shared across instances -------------------------------------
