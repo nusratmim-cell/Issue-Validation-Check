@@ -205,21 +205,72 @@ GOOGLE_G = ('<svg width="18" height="18" viewBox="0 0 48 48">'
             '<path fill="#EA4335" d="M24 10.5c3.3 0 5.5 1.4 6.8 2.6l6-5.9C33.1 3.9 29.9 2 24 2 15.4 2 7.9 7 4.3 14.2l7 5.4C13.1 14.4 18.1 10.5 24 10.5z"/></svg>')
 
 
+LOGIN_CSS = """
+:root{--lbg:#0b0b0d;--lcard:#161619;--lline:#282830;--ltext:#f4f4f6;
+  --lmuted:#8b8b96;--lbtn:#e8e8ea;--lbtn-ink:#17171a}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--lbg);color:var(--ltext);
+  font-family:'Segoe UI',-apple-system,system-ui,'Noto Sans Bengali',sans-serif}
+.rule{height:3px;background:linear-gradient(90deg,#efad1e,#ee3d5e 34%,#cf278d 67%,#354894)}
+.shell{min-height:calc(100% - 3px);display:flex;align-items:center;
+  justify-content:center;padding:28px}
+.box{width:100%;max-width:392px;background:var(--lcard);
+  border:1px solid var(--lline);border-radius:14px;padding:34px 32px 28px;
+  text-align:center}
+.box img{height:38px;width:auto;margin:0 auto 20px;display:block}
+.box h1{font-size:21px;font-weight:600;margin:0 0 7px;letter-spacing:-.01em}
+.box .sub{font-size:14px;color:var(--lmuted);margin:0 0 24px;line-height:1.55}
+.signin{display:flex;align-items:center;justify-content:center;gap:11px;
+  width:100%;background:var(--lbtn);color:var(--lbtn-ink);border:0;
+  border-radius:9px;padding:13px 18px;font-size:15px;font-weight:600;
+  font-family:inherit;text-decoration:none;cursor:pointer;transition:opacity .15s}
+.signin:hover{opacity:.88}
+.only{font-size:12.5px;color:var(--lmuted);margin:18px 0 0}
+.only b{color:#b6b6c0;font-weight:600}
+.alert{background:#2a1c20;border:1px solid #57323c;color:#f0b8c4;
+  border-radius:9px;padding:11px 14px;font-size:13.5px;margin:0 0 20px;
+  text-align:left;line-height:1.55}
+.pwform{text-align:left;display:flex;flex-direction:column;gap:13px}
+.pwform label{font-size:11px;font-weight:600;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--lmuted);display:block;margin-bottom:6px}
+.pwform input{width:100%;background:#0e0e11;border:1px solid var(--lline);
+  border-radius:8px;padding:11px 13px;color:var(--ltext);font-size:15px;
+  font-family:inherit}
+.pwform input:focus{outline:0;border-color:#4a4a58}
+.pwform button{width:100%;background:var(--lbtn);color:var(--lbtn-ink);border:0;
+  border-radius:9px;padding:12px;font-size:15px;font-weight:600;
+  font-family:inherit;cursor:pointer;margin-top:4px}
+:focus-visible{outline:2px solid #cf278d;outline-offset:2px}
+"""
+
+
 def login_page(msg=''):
-    warn = f'<div class="err" style="margin-bottom:18px">{E(msg)}</div>' if msg else ''
+    alert = f'<div class="alert">{E(msg)}</div>' if msg else ''
     if auth.OAUTH_ON:
-        inner = (f'<p class="hint" style="margin:0 0 22px">আপনার '
-                 f'<b>@{E(auth.ALLOWED_DOMAIN)}</b> Google অ্যাকাউন্ট দিয়ে সাইন ইন করুন।</p>'
-                 f'<a class="gbtn" href="/auth/start">{GOOGLE_G} Google দিয়ে সাইন ইন</a>')
+        body = (f'<p class="sub">Sign in with your Shikho Google account to continue</p>'
+                f'{alert}'
+                f'<a class="signin" href="/auth/start">{GOOGLE_G} Sign in with Google</a>'
+                f'<p class="only">Only <b>@{E(auth.ALLOWED_DOMAIN)}</b> emails are allowed</p>')
     else:
-        inner = ('<form method="POST" action="/login">'
-                 '<label>ইউজারনেম</label><input type="text" name="user" autofocus required>'
-                 '<div style="height:14px"></div>'
-                 '<label>পাসওয়ার্ড</label><input type="password" name="pw" required>'
-                 '<div style="height:20px"></div><button type="submit">লগ ইন</button></form>'
-                 '<p class="hint">Google সাইন ইন কনফিগার করা নেই - লোকাল মোড।</p>')
-    return page(f'''{warn}<div class="card" style="max-width:440px;margin:52px auto">
-      <h2>লগ ইন</h2>{inner}</div>''')
+        # Google is not configured on this deployment, so the portal falls back
+        # to the CX_USERS password list. Say so plainly rather than silently
+        # showing a different login than the one people were told to expect.
+        body = (f'<p class="sub">Google সাইন ইন এই ডিপ্লয়মেন্টে সেট করা নেই — '
+                f'পাসওয়ার্ড দিয়ে লগ ইন করুন।</p>{alert}'
+                f'<form class="pwform" method="POST" action="/login">'
+                f'<div><label>ইউজারনেম</label>'
+                f'<input type="text" name="user" autofocus required></div>'
+                f'<div><label>পাসওয়ার্ড</label>'
+                f'<input type="password" name="pw" required></div>'
+                f'<button type="submit">লগ ইন</button></form>'
+                f'<p class="only">GOOGLE_CLIENT_ID সেট করলে Google সাইন ইন চালু হবে</p>')
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<title>Issue Validation Check</title><style>{LOGIN_CSS}</style></head>'
+            f'<body><div class="rule"></div><div class="shell"><div class="box">'
+            f'<img src="/logo.svg" alt="GPA-5 সংবর্ধনা">'
+            f'<h1>Issue Validation Check</h1>{body}</div></div></body></html>').encode()
 
 
 def flag(label, val):
