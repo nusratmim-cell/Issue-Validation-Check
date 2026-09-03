@@ -362,6 +362,13 @@ def render_student(d, cached, q='', ambiguous=False):
         row('রেজিস্ট্রেশন আইডি', d.get('regid_p')),
         row('শেষ আপডেট', (d.get('updated_at') or '')[:10]),
         row('প্যানেল আইডি', d.get('sid')),
+        # The panel's own verification status. It is the last field CX used to
+        # open the panel for, so it belongs here instead. Shown as হ্যাঁ/না when
+        # it is a flag, as text when the panel spells it out.
+        ('' if d.get('gpa5_check_status') in (None, '')
+         else row('GPA-5 যাচাই',
+                  {1: 'হ্যাঁ', 0: 'না'}.get(d.get('gpa5_check_status'),
+                                            d.get('gpa5_check_status')))),
     ])
     flags = (flag('প্রোফাইল সম্পূর্ণ', d.get('is_update_profile'))
              + flag('পাসওয়ার্ড সেট', d.get('is_password_set'))
@@ -371,15 +378,13 @@ def render_student(d, cached, q='', ambiguous=False):
              + (' একই তথ্যে একাধিক শিক্ষার্থী আছে — নিচের সবগুলো দেখে নিশ্চিত হোন।'
                 if ambiguous else '') + '</p>') if q else ''
     src = 'সংরক্ষিত তথ্য' if cached else 'এইমাত্র নেওয়া'
-    link = f'https://www.gpa5reception.com/student-data/{E(str(d.get("sid")))}'
     return f'''<div class="card">
       <div class="verdict v-yes"><span class="mark">✓</span>
         প্রোফাইল পাওয়া গেছে — অ্যাকাউন্ট আছে</div>
       {match}
       <div class="flags">{flags}</div>
       <div class="scroll"><table>{rows}</table></div>
-      <div class="meta">তথ্য প্যানেলে যেভাবে সংরক্ষিত আছে · {src} ·
-        <a href="{link}" target="_blank" rel="noopener">প্যানেলে খুলুন ↗</a></div>
+      <div class="meta">উপরের তথ্য প্যানেলে যেভাবে সংরক্ষিত আছে · {src}</div>
     </div>'''
 
 
