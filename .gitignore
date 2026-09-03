@@ -1,0 +1,10 @@
+config.json
+audit.log
+*.log
+__pycache__/
+*.pyc
+.vercel
+.env
+.env.*
+*.xlsx
+*.csv

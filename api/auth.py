@@ -1,0 +1,146 @@
+"""Who is allowed in.
+
+Primary: Google sign-in restricted to the company domain. Anyone with a
+@shikho.com Google account can use the portal; nobody else can, and no
+passwords have to be issued or rotated.
+
+Typing an address proves nothing, so the email is never taken from the form.
+It comes from an id_token that this server fetched directly from Google's
+token endpoint over TLS using the client secret - which is what makes the
+claim trustworthy - and it must additionally be marked verified by Google and
+sit in ALLOWED_DOMAIN.
+
+Fallback: if GOOGLE_CLIENT_ID is unset (local runs), the password users in
+CX_USERS are used instead so the portal still starts.
+"""
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+from urllib.parse import urlencode
+
+import requests
+
+CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+ALLOWED_DOMAIN = os.environ.get('ALLOWED_DOMAIN', 'shikho.com').lower().lstrip('@')
+SECRET = os.environ.get('PORTAL_SECRET', '')
+SESSION_HOURS = 12
+
+AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+TOKEN_URL = 'https://oauth2.googleapis.com/token'
+
+OAUTH_ON = bool(CLIENT_ID and CLIENT_SECRET)
+
+try:
+    USERS = json.loads(os.environ.get('CX_USERS', '{}'))
+except json.JSONDecodeError:
+    USERS = {}
+
+
+class AuthError(RuntimeError):
+    pass
+
+
+# --------------------------------------------------------------------------
+# signed values (session cookie, oauth state)
+# --------------------------------------------------------------------------
+def _sig(body):
+    return hmac.new(SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def make_token(email, hours=SESSION_HOURS):
+    body = f'{email}|{int(time.time()) + hours * 3600}'
+    return f'{body}|{_sig(body)}'
+
+
+def read_token(tok):
+    if not SECRET or not tok:
+        return None
+    try:
+        email, exp, sig = tok.split('|')
+    except ValueError:
+        return None
+    if not hmac.compare_digest(sig, _sig(f'{email}|{exp}')):
+        return None
+    if int(exp) < time.time():
+        return None
+    if OAUTH_ON:
+        return email if allowed(email) else None
+    return email if email in USERS else None
+
+
+def allowed(email):
+    return bool(email) and email.lower().endswith('@' + ALLOWED_DOMAIN)
+
+
+# --------------------------------------------------------------------------
+# password fallback
+# --------------------------------------------------------------------------
+def hash_pw(pw, salt):
+    h = hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 200_000)
+    return f'{salt}${h.hex()}'
+
+
+def check_pw(pw, stored):
+    try:
+        salt, _ = stored.split('$', 1)
+    except (ValueError, AttributeError):
+        return False
+    return hmac.compare_digest(hash_pw(pw, salt), stored)
+
+
+# --------------------------------------------------------------------------
+# Google OAuth
+# --------------------------------------------------------------------------
+def redirect_uri(host, scheme='https'):
+    override = os.environ.get('OAUTH_REDIRECT_URI')
+    if override:
+        return override
+    if host.startswith('localhost') or host.startswith('127.0.0.1'):
+        scheme = 'http'
+    return f'{scheme}://{host}/auth/callback'
+
+
+def start_url(host):
+    state = make_token('oauth-state', hours=0.05)     # ~3 min, signed
+    q = urlencode({
+        'client_id': CLIENT_ID,
+        'redirect_uri': redirect_uri(host),
+        'response_type': 'code',
+        'scope': 'openid email profile',
+        'hd': ALLOWED_DOMAIN,          # hint only - re-checked server side
+        'prompt': 'select_account',
+        'state': state,
+    })
+    return f'{AUTH_URL}?{q}'
+
+
+def _decode_id_token(id_token):
+    """Read the payload of a token that came straight from Google's token
+    endpoint. No signature check is needed because it was not supplied by the
+    browser - this server fetched it over TLS using the client secret."""
+    payload = id_token.split('.')[1]
+    payload += '=' * (-len(payload) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload))
+
+
+def finish(code, state, host):
+    if read_token(state) != 'oauth-state':
+        raise AuthError('লগ ইন লিঙ্কটি মেয়াদোত্তীর্ণ। আবার চেষ্টা করুন।')
+    r = requests.post(TOKEN_URL, timeout=20, data={
+        'code': code, 'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET,
+        'redirect_uri': redirect_uri(host), 'grant_type': 'authorization_code'})
+    if r.status_code != 200:
+        raise AuthError('Google লগ ইন সম্পন্ন হয়নি। আবার চেষ্টা করুন।')
+    claims = _decode_id_token(r.json()['id_token'])
+
+    email = (claims.get('email') or '').lower()
+    if not claims.get('email_verified'):
+        raise AuthError('Google এই ইমেইলটি ভেরিফাই করেনি।')
+    if not allowed(email):
+        raise AuthError(f'শুধুমাত্র @{ALLOWED_DOMAIN} ইমেইল দিয়ে লগ ইন করা যাবে। '
+                        f'আপনি {email} দিয়ে চেষ্টা করেছেন।')
+    return email
