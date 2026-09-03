@@ -34,7 +34,23 @@ def admin():
     global _up
     if _up is None:
         _up = Upstream()
+    # Fresh time budget per incoming request. The instance is reused across
+    # invocations, so this has to reset here, not in the constructor.
+    _up.start_budget()
     return _up
+
+
+def friendly(e):
+    """CX sees what to do next, not a Python exception. The detail still goes
+    to the audit log for whoever is debugging."""
+    t = str(e)
+    if 'timed out' in t.lower() or 'timeout' in t.lower():
+        return ('admin panel এখন খুব ধীরে সাড়া দিচ্ছে, তাই উত্তর আসেনি। '
+                'কয়েক সেকেন্ড পর আবার খুঁজুন — সাধারণত পরের চেষ্টায় কাজ করে।')
+    if 'login' in t.lower() or 'password' in t.lower():
+        return 'admin panel এ লগ ইন করা যায়নি। Shikho Tech কে জানান।'
+    return ('admin panel এ পৌঁছানো যায়নি। কিছুক্ষণ পর আবার চেষ্টা করুন। '
+            'বারবার হলে Shikho Tech কে জানান।')
 
 
 def audit(user, action, detail, ip=''):
@@ -79,11 +95,16 @@ def matched_on(q, d):
 # ---------------------------------------------------------------------------
 # rendering
 # ---------------------------------------------------------------------------
+# Webfont weight is dominated by Bengali glyph coverage, not by how many
+# weights are asked for: Hind Siliguri costs 241 KB at one weight and 504 KB at
+# two. So one weight of it, one real serif weight for headings where the
+# contrast actually shows, and the system monospace for identifiers - 311 KB
+# against the 1.02 MB the first cut shipped. display=swap paints text in the
+# fallback immediately regardless.
 FONTS = ('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
          '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
-         'family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&'
-         'family=Hind+Siliguri:wght@300;400;500;600;700&'
-         'family=JetBrains+Mono:wght@400;500&display=swap">')
+         'family=Fraunces:opsz,wght@9..144,600&'
+         'family=Hind+Siliguri:wght@400&display=swap">')
 
 # Fraunces carries the headings - a serif gives the tool some composure without
 # costing legibility. Hind Siliguri is a Bengali face, so Bangla labels are set
@@ -100,7 +121,7 @@ CSS = """
   --shadow:0 1px 2px rgba(20,23,40,.04), 0 14px 34px rgba(20,23,40,.055);
   --serif:Fraunces,Georgia,"Times New Roman",serif;
   --sans:"Hind Siliguri",-apple-system,"Segoe UI",system-ui,sans-serif;
-  --mono:"JetBrains Mono",ui-monospace,monospace;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--body);font-family:var(--sans);
@@ -132,7 +153,7 @@ label{display:block;font-size:11px;font-weight:600;color:var(--muted);
 input[type=text],input[type=password],textarea{width:100%;padding:13px 15px;
   border:1px solid #d7dce8;border-radius:9px;font-size:15.5px;font-family:var(--sans);
   background:var(--card);color:var(--ink);transition:border-color .15s,box-shadow .15s}
-input[type=text]{font-family:var(--mono);font-size:15px}
+input[type=text]{font-family:var(--mono);font-size:15px;font-weight:400}
 input:focus,textarea:focus{outline:0;border-color:var(--blue);
   box-shadow:0 0 0 3px rgba(53,72,148,.11)}
 textarea{min-height:160px;resize:vertical;line-height:1.75;font-family:var(--mono);
@@ -164,7 +185,7 @@ th{text-align:left;font-size:10.5px;font-weight:600;color:var(--muted);
 td{padding:11px 10px;border-bottom:1px solid var(--hair);vertical-align:top}
 tr:last-child td{border-bottom:0}
 td.k{color:var(--muted);width:210px;font-size:13px}
-td.v{color:var(--ink);font-weight:500}
+td.v{color:var(--ink)}
 td.v.id{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13.5px}
 .scroll{overflow-x:auto;margin-top:8px}
 .flags{display:flex;gap:9px;flex-wrap:wrap;margin:20px 0 8px}
@@ -229,7 +250,7 @@ LOGIN_CSS = """
   --muted:#727a96;--faint:#9ba2b8;--blue:#354894;--purple:#cf278d;
   --serif:Fraunces,Georgia,"Times New Roman",serif;
   --sans:"Hind Siliguri",-apple-system,"Segoe UI",system-ui,sans-serif;
-  --mono:"JetBrains Mono",ui-monospace,monospace}
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--body);font-family:var(--sans);
@@ -630,8 +651,7 @@ class handler(BaseHTTPRequestHandler):
             return self._send(search_page(user, q, body))
         except Exception as e:
             audit(user, 'search_error', {'q': q, 'err': str(e)}, self._ip())
-            body = (f'<div class="card"><div class="err"><b>admin panel এ পৌঁছানো যায়নি।</b>'
-                    f'<br>{E(str(e))}<br><br>কিছুক্ষণ পর আবার চেষ্টা করুন।</div></div>')
+            body = (f'<div class="card"><div class="err">{E(friendly(e))}</div></div>')
             return self._send(search_page(user, q, body))
         audit(user, 'search', {'q': q, 'found': len(results)}, self._ip())
         many = len(results) > 1

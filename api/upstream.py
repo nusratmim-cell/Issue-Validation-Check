@@ -20,7 +20,14 @@ import requests
 from store import Pacer, store
 
 BASE = 'https://www.gpa5reception.com'
-TIMEOUT = 45
+
+# Vercel kills the function at 60s. A single 45s read plus a re-login and a
+# retry could ask for well over that, so a slow admin panel produced a blank
+# 504 from Vercel instead of our own message. Every request now draws from one
+# per-invocation budget and we stop while there is still time to explain why.
+BUDGET = 42.0            # seconds of upstream time per incoming request
+TIMEOUT = 15             # cap for any single upstream request
+MIN_ATTEMPT = 4.0        # below this there is no point starting another call
 SESSION_KEY = 'gpa5:admin_cookies'
 SESSION_TTL = 3600
 
@@ -74,7 +81,24 @@ class Upstream:
         self.password = os.environ.get('ADMIN_PASSWORD', '')
         self.s = requests.Session()
         self.s.headers['User-Agent'] = 'Mozilla/5.0 Chrome/128'
+        self._deadline = None
         self._restore()
+
+    # -- time budget ---------------------------------------------------------
+    def start_budget(self, seconds=BUDGET):
+        self._deadline = time.monotonic() + seconds
+
+    def _left(self):
+        if self._deadline is None:
+            return TIMEOUT
+        return self._deadline - time.monotonic()
+
+    def _timeout(self):
+        """How long this call may take, or refuse if there is no time left."""
+        left = self._left()
+        if left < MIN_ATTEMPT:
+            raise AdminError('admin panel সময়মতো সাড়া দেয়নি')
+        return min(TIMEOUT, left)
 
     # -- session shared across instances -------------------------------------
     def _restore(self):
@@ -102,12 +126,12 @@ class Upstream:
         if not self.email or not self.password:
             raise AdminError('ADMIN_EMAIL / ADMIN_PASSWORD are not set on the server')
         with Pacer():
-            r = self.s.get(BASE + '/login', timeout=TIMEOUT)
+            r = self.s.get(BASE + '/login', timeout=self._timeout())
         m = re.search(r'name="_token" value="([^"]+)"', r.text)
         if not m:
             raise AdminError('login page has no CSRF token')
         with Pacer():
-            self.s.post(BASE + '/login', timeout=TIMEOUT, data={
+            self.s.post(BASE + '/login', timeout=self._timeout(), data={
                 '_token': m.group(1), 'email': self.email,
                 'password': self.password})
         self._remember()
@@ -118,7 +142,7 @@ class Upstream:
             if not self.s.cookies:
                 self.login()
             with Pacer():
-                r = self.s.get(BASE + path, timeout=TIMEOUT)
+                r = self.s.get(BASE + path, timeout=self._timeout())
             if r.status_code == 200 and 'Please Sign In' not in r.text:
                 return r
             if attempt == 1:
