@@ -25,6 +25,7 @@ from upstream import Upstream                          # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOGO = os.path.join(os.path.dirname(HERE), 'public', 'logo.svg')
+FAVICON = os.path.join(os.path.dirname(HERE), 'public', 'favicon.svg')
 AUDIT_KEY = 'gpa5:audit'
 E = html.escape
 _up = None
@@ -101,6 +102,8 @@ def matched_on(q, d):
 # contrast actually shows, and the system monospace for identifiers - 311 KB
 # against the 1.02 MB the first cut shipped. display=swap paints text in the
 # fallback immediately regardless.
+ICON = '<link rel="icon" href="/favicon.svg" type="image/svg+xml">'
+
 FONTS = ('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
          '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
          'family=Fraunces:opsz,wght@9..144,600&'
@@ -230,7 +233,7 @@ def page(body, user=None, title='Issue Validation Check', script=''):
     warn = DEGRADED_BANNER if (DEGRADED and user) else ''
     return (f'<!doctype html><html lang="bn"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>{E(title)}</title>{FONTS}<style>{CSS}</style></head><body>'
+            f'<title>{E(title)}</title>{ICON}{FONTS}<style>{CSS}</style></head><body>'
             f'<div class="brandbar"></div>'
             f'<header><div class="brand">'
             f'<img src="/logo.svg" alt="GPA-5 সংবর্ধনা">'
@@ -315,7 +318,7 @@ def login_page(msg=''):
                 f'<p class="only">GOOGLE_CLIENT_ID সেট করলে Google সাইন ইন চালু হবে</p>')
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>Issue Validation Check</title>{FONTS}'
+            f'<title>Issue Validation Check</title>{ICON}{FONTS}'
             f'<style>{LOGIN_CSS}</style></head>'
             f'<body><div class="rule"></div><div class="shell"><div class="box">'
             f'<img src="/logo.svg" alt="GPA-5 সংবর্ধনা">'
@@ -556,10 +559,11 @@ class handler(BaseHTTPRequestHandler):
         path = u.path.rstrip('/') or '/'
         qs = parse_qs(u.query)
 
-        if path == '/logo.svg':                 # Vercel serves public/ directly;
-            try:                                # this covers the local runner
-                with open(LOGO, 'rb') as f:
-                    return self._send(f.read(), ctype='image/svg+xml',
+        if path in ('/logo.svg', '/favicon.svg'):  # Vercel serves public/
+            try:                                   # directly; this covers the
+                f = LOGO if path == '/logo.svg' else FAVICON   # local runner
+                with open(f, 'rb') as fh:
+                    return self._send(fh.read(), ctype='image/svg+xml',
                                       cache='public, max-age=86400')
             except OSError:
                 return self._send(b'', 404)
