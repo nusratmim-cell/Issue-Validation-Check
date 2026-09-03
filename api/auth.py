@@ -8,7 +8,12 @@ Typing an address proves nothing, so the email is never taken from the form.
 It comes from an id_token that this server fetched directly from Google's
 token endpoint over TLS using the client secret - which is what makes the
 claim trustworthy - and it must additionally be marked verified by Google and
-sit in ALLOWED_DOMAIN.
+either sit in ALLOWED_DOMAIN or be named in ALLOWED_EMAILS.
+
+ALLOWED_EMAILS is the guest list: named individuals outside the company domain
+(agency and partner staff on their own Google accounts) who need the portal.
+It lives in an environment variable rather than in this file because the repo
+is public and those are personal addresses.
 
 Fallback: if GOOGLE_CLIENT_ID is unset (local runs), the password users in
 CX_USERS are used instead so the portal still starts.
@@ -18,6 +23,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from urllib.parse import urlencode
 
@@ -26,6 +32,10 @@ import requests
 CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
 CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
 ALLOWED_DOMAIN = os.environ.get('ALLOWED_DOMAIN', 'shikho.com').lower().lstrip('@')
+
+# Comma-, space- or newline-separated; a pasted list survives either way.
+ALLOWED_EMAILS = {e.lower() for e in
+                  re.split(r'[,\s]+', os.environ.get('ALLOWED_EMAILS', '')) if e}
 SECRET = os.environ.get('PORTAL_SECRET', '')
 SESSION_HOURS = 12
 
@@ -108,7 +118,10 @@ def check_state(tok):
 
 
 def allowed(email):
-    return bool(email) and email.lower().endswith('@' + ALLOWED_DOMAIN)
+    if not email:
+        return False
+    email = email.lower()
+    return email.endswith('@' + ALLOWED_DOMAIN) or email in ALLOWED_EMAILS
 
 
 # --------------------------------------------------------------------------
@@ -141,15 +154,20 @@ def redirect_uri(host, scheme='https'):
 
 def start_url(host):
     state = make_state()
-    q = urlencode({
+    q = {
         'client_id': CLIENT_ID,
         'redirect_uri': redirect_uri(host),
         'response_type': 'code',
         'scope': 'openid email profile',
-        'hd': ALLOWED_DOMAIN,          # hint only - re-checked server side
         'prompt': 'select_account',
         'state': state,
-    })
+    }
+    # 'hd' is a hint, but Google honours it by hiding every account outside the
+    # domain - which would leave the guest list unable to reach the chooser.
+    # Drop it when there is a guest list; the real check is server side either way.
+    if not ALLOWED_EMAILS:
+        q['hd'] = ALLOWED_DOMAIN
+    q = urlencode(q)
     return f'{AUTH_URL}?{q}'
 
 
@@ -176,6 +194,7 @@ def finish(code, state, host):
     if not claims.get('email_verified'):
         raise AuthError('Google এই ইমেইলটি ভেরিফাই করেনি।')
     if not allowed(email):
-        raise AuthError(f'শুধুমাত্র @{ALLOWED_DOMAIN} ইমেইল দিয়ে লগ ইন করা যাবে। '
+        raise AuthError(f'এই ইমেইলটির অনুমতি নেই — @{ALLOWED_DOMAIN} ইমেইল অথবা '
+                        f'অনুমোদিত ঠিকানা দিয়ে লগ ইন করুন। '
                         f'আপনি {email} দিয়ে চেষ্টা করেছেন।')
     return email

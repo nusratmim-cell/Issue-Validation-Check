@@ -299,10 +299,14 @@ body{margin:0;background:var(--bg);color:var(--body);font-family:var(--sans);
 def login_page(msg=''):
     alert = f'<div class="alert">{E(msg)}</div>' if msg else ''
     if auth.OAUTH_ON:
-        body = (f'<p class="sub">Sign in with your Shikho Google account to continue</p>'
+        # Guests sign in on their own Google accounts, so the notice can't
+        # promise the domain is the only way in once a guest list exists.
+        who = (f'<b>@{E(auth.ALLOWED_DOMAIN)}</b> and approved emails'
+               if auth.ALLOWED_EMAILS else f'<b>@{E(auth.ALLOWED_DOMAIN)}</b> emails')
+        body = (f'<p class="sub">Sign in with your approved Google account to continue</p>'
                 f'{alert}'
                 f'<a class="signin" href="/auth/start">{GOOGLE_G} Sign in with Google</a>'
-                f'<p class="only">Only <b>@{E(auth.ALLOWED_DOMAIN)}</b> emails are allowed</p>')
+                f'<p class="only">Only {who} are allowed</p>')
     else:
         # Google is not configured on this deployment, so the portal falls back
         # to the CX_USERS password list. Say so plainly rather than silently
@@ -588,6 +592,7 @@ class handler(BaseHTTPRequestHandler):
                 'shared_state': not DEGRADED,
                 'google_login': auth.OAUTH_ON,
                 'domain': auth.ALLOWED_DOMAIN,
+                'guest_emails': len(auth.ALLOWED_EMAILS),
                 'env_set': env,
                 'missing': missing,
                 'hint': ('all variables present' if not missing else
